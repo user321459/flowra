@@ -15,6 +15,8 @@ FLOWRA is built on four core principles derived from information flow theory:
 3. **Dynamic Rank Refinement**: Adjusts layer-specific ranks during training to track evolving task requirements
 4. **Orthogonal Multi-Task Composition**: Enables near-independent task performance when merging multiple adapters with minimal interference
 
+![flowra_8](images/flowra_8.png)
+
 ## Installation
 
 ### Prerequisites

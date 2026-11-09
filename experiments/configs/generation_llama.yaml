@@ -1,0 +1,27 @@
+# Extractive QA on LLaMA-3-8B. Alpaca is alpaca_llama2_7b.yaml; code is reasoning_llama13b.yaml.
+model: meta-llama/Meta-Llama-3-8B
+dtype: bfloat16
+max_length: 512
+batch_size: 1
+eval_batch_size: 1
+lora_rank: 16
+
+flowra:
+  budget: 0.0087
+  eta: 0.3
+  calibration_samples: 512
+  modules_to_save: []
+
+training:
+  lr: 0.001
+  weight_decay: 0.0
+  lr_schedule: linear
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+  max_steps: 5000
+
+max_eval_new_tokens: 32
+seeds: [0, 1, 2]
+methods: [full_ft, lora, flowra]
+qa_datasets: [squad, squad_v2, natural_questions, trivia_qa]

@@ -1,44 +1,50 @@
 """
-Flow Analysis Module
-
-This subpackage implements the theoretical foundation of FLOWRA:
-- Fisher Information Matrix estimation
-- Flow Sensitivity Index computation
-- Flow Conductance metrics
-- Redundancy analysis
+Calibration-phase analysis: flow-change descriptors, architecture handlers
+and layer / block criticality scores.
 """
 
-from flowra.core.analysis.flow_analyzer import FlowAnalyzer
-from flowra.core.analysis.flow_metrics import FlowProfile, LayerFlowInfo
-from flowra.core.analysis.fisher import (
-    FisherEstimator,
-    EmpiricalFisherEstimator,
-    DiagonalFisherEstimator,
-    KFACEstimator,
+from flowra.core.analysis.flow_descriptor import (
+    FixedProjector,
+    align_states,
+    flow_change,
+    flow_change_from_sequence,
 )
-from flowra.core.analysis.jacobian import (
-    JacobianEstimator,
-    PowerIterationEstimator,
-    HutchinsonEstimator,
+from flowra.core.analysis.handlers import (
+    ArchitectureHandler,
+    FeedForwardHandler,
+    GatedRNNHandler,
+    ResidualCNNHandler,
+    TargetInfo,
+    TransformerHandler,
+    allocate_head_ranks,
+    attention_ffn_rank_ratio,
+    extract_block,
+    get_handler,
+    head_divergence,
+    head_flow_descriptors,
+    split_attention_rank,
 )
-from flowra.core.analysis.redundancy import (
-    RedundancyAnalyzer,
-    compute_effective_rank,
-    compute_redundancy_coefficient,
-)
+from flowra.core.analysis.profiler import CalibrationProfile, FlowProfiler, ModuleProfile
 
 __all__ = [
-    "FlowAnalyzer",
-    "FlowProfile",
-    "LayerFlowInfo",
-    "FisherEstimator",
-    "EmpiricalFisherEstimator",
-    "DiagonalFisherEstimator",
-    "KFACEstimator",
-    "JacobianEstimator",
-    "PowerIterationEstimator",
-    "HutchinsonEstimator",
-    "RedundancyAnalyzer",
-    "compute_effective_rank",
-    "compute_redundancy_coefficient",
+    "FixedProjector",
+    "align_states",
+    "flow_change",
+    "flow_change_from_sequence",
+    "ArchitectureHandler",
+    "FeedForwardHandler",
+    "GatedRNNHandler",
+    "ResidualCNNHandler",
+    "TargetInfo",
+    "TransformerHandler",
+    "allocate_head_ranks",
+    "attention_ffn_rank_ratio",
+    "extract_block",
+    "get_handler",
+    "head_divergence",
+    "head_flow_descriptors",
+    "split_attention_rank",
+    "CalibrationProfile",
+    "FlowProfiler",
+    "ModuleProfile",
 ]

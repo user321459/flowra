@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowra"
+version = "1.0.0"
+description = "Flow-Guided Rank Allocation for Parameter-Efficient Fine-Tuning of Deep Neural Networks"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.1.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+experiments = [
+    "torchvision>=0.16.0",
+    "scipy>=1.10.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.7.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.65.0",
+    "Pillow>=9.5.0",
+    "transformers>=4.40.0",
+    "datasets>=2.18.0",
+    "accelerate>=0.27.0",
+    "sentencepiece>=0.1.99",
+    "protobuf>=4.25.0",
+    "safetensors>=0.4.0",
+    "huggingface_hub>=0.20.0",
+    "evaluate>=0.4.1",
+    "peft>=0.10.0",
+    "timm>=0.9.16",
+    "scikit-learn>=1.3.0",
+]
+[tool.setuptools.packages.find]
+include = ["flowra*"]

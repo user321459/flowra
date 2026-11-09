@@ -1,164 +1,155 @@
 """
-Multi-Task Composition Algorithms
+Multi-task adapter composition.
 
-Orthogonal Adapter Composition
+Each task contributes per-layer updates ``Delta W_t``.  The FLowRA composer
+measures the subspace interference between tasks,
+
+    I(i, j) = ||U_i^T U_j||_F^2 / min(k_i, k_j),
+
+where ``U`` spans the dominant left singular subspace of ``Delta W``
+(capturing ``energy`` of its spectrum).  When ``I(i, j) > eta`` (composition
+threshold, default 0.3) the later update is projected onto the orthogonal
+complement of the earlier ones before summation.  Baselines: naive
+averaging, task arithmetic and TIES-Merging.
 """
+
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
-from typing import Dict, List, Optional, Tuple
-from abc import ABC, abstractmethod
-import numpy as np
+
+from flowra.core.adapters.base import BaseAdapter
+from flowra.core.adapters.block import BlockLoRA
+from flowra.core.adapters.lora import DoRALinear
+from flowra.core.adapters.rnn import GatedRNNAdapter
+
+Deltas = Dict[str, torch.Tensor]
 
 
-class AdapterComposer(ABC):
-    """Base class for adapter composition."""
-    
-    @abstractmethod
-    def compose(self, adapters: List[Dict[str, nn.Module]], weights: List[float] = None) -> Dict[str, torch.Tensor]:
-        pass
+@torch.no_grad()
+def adapter_deltas(adapters: Dict[str, BaseAdapter]) -> Deltas:
+    """Dense weight updates ``Delta W`` of all low-rank adapters (keyed by module name)."""
+    out: Deltas = {}
+    for name, adapter in adapters.items():
+        if isinstance(adapter, BlockLoRA):
+            out[name] = adapter.delta().reshape_as(adapter.base.weight).clone()
+        elif isinstance(adapter, DoRALinear):
+            out[name] = (adapter._weight() - adapter.base.weight).clone()
+        elif isinstance(adapter, GatedRNNAdapter):
+            for key, w in adapter._weights().items():
+                out[f"{name}.{key}"] = (w - getattr(adapter.base, key)).clone()
+        elif "" in adapter.factors():
+            f = adapter.factors()[""]
+            out[name] = f.delta().reshape_as(adapter.base.weight).clone() if f.rank else torch.zeros_like(adapter.base.weight)
+    return out
 
 
-class LinearComposer(AdapterComposer):
-    """Simple weighted average composition."""
-    
-    def compose(self, adapters: List[Dict[str, nn.Module]], weights: List[float] = None) -> Dict[str, torch.Tensor]:
-        K = len(adapters)
-        if weights is None:
-            weights = [1.0/K] * K
-        
-        weights = [w/sum(weights) for w in weights]
-        
-        all_layers = set()
-        for a in adapters:
-            all_layers.update(a.keys())
-        
-        merged = {}
-        for layer in all_layers:
-            layer_adapts = []
-            layer_weights = []
-            
-            for k, a in enumerate(adapters):
-                if layer in a and hasattr(a[layer], 'get_adaptation'):
-                    layer_adapts.append(a[layer].get_adaptation().detach())
-                    layer_weights.append(weights[k])
-            
-            if layer_adapts:
-                w_norm = [w/sum(layer_weights) for w in layer_weights]
-                merged[layer] = sum(w * a for w, a in zip(w_norm, layer_adapts))
-        
-        return merged
+@torch.no_grad()
+def apply_deltas(model: nn.Module, deltas: Deltas) -> nn.Module:
+    """Add merged updates to the weights of a (non-adapted) model."""
+    for name, delta in deltas.items():
+        module_name, _, param = name.rpartition(".")
+        if param.startswith(("weight_ih", "weight_hh")):
+            getattr(model.get_submodule(module_name), param).add_(delta)
+        else:
+            model.get_submodule(name).weight.add_(delta.reshape_as(model.get_submodule(name).weight))
+    return model
 
 
-class OrthogonalComposer(AdapterComposer):
-    """
-    Orthogonal Adapter Composition
-    
-    Minimizes interference through Gram-Schmidt orthogonalization.
-    """
-    
-    def __init__(self, threshold: float = 0.3, angle_threshold: float = np.pi/4):
-        self.threshold = threshold
-        self.angle_threshold = angle_threshold
-    
-    def compute_interference(self, a1: torch.Tensor, a2: torch.Tensor) -> float:
-        overlap = a1 * a2
-        n1, n2 = a1.norm(), a2.norm()
-        if n1 > 0 and n2 > 0:
-            return (overlap.norm() / (n1 * n2)).item()
+def _principal_subspace(delta: torch.Tensor, energy: float) -> torch.Tensor:
+    mat = delta.reshape(delta.shape[0], -1).float()
+    if not torch.any(mat):
+        return mat.new_zeros(mat.shape[0], 0)
+    u, s, _ = torch.linalg.svd(mat, full_matrices=False)
+    cum = (s ** 2).cumsum(0) / (s ** 2).sum()
+    k = int((cum < energy).sum().item()) + 1
+    return u[:, :k]
+
+
+def subspace_interference(d1: torch.Tensor, d2: torch.Tensor, energy: float = 0.95) -> float:
+    u1, u2 = _principal_subspace(d1, energy), _principal_subspace(d2, energy)
+    k = min(u1.shape[1], u2.shape[1])
+    if k == 0:
         return 0.0
-    
-    def orthogonalize(self, a1: torch.Tensor, a2: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        v1 = a1.flatten()
-        v2 = a2.flatten()
-        
-        v1_norm = v1 / (v1.norm() + 1e-10)
-        proj = torch.dot(v2, v1_norm) * v1_norm
-        v2_orth = v2 - proj
-        
-        return a1, v2_orth.view(a2.shape)
-    
-    def compose(self, adapters: List[Dict[str, nn.Module]], weights: List[float] = None) -> Dict[str, torch.Tensor]:
-        K = len(adapters)
-        if K == 0:
-            return {}
-        
-        if weights is None:
-            weights = [1.0/K] * K
-        weights = [w/sum(weights) for w in weights]
-        
-        # Find conflicts
-        task_vecs = []
-        for a in adapters:
-            params = []
-            for adapter in a.values():
-                if hasattr(adapter, 'get_adaptation'):
-                    params.append(adapter.get_adaptation().flatten())
-            task_vecs.append(torch.cat(params) if params else torch.tensor([0.0]))
-        
-        conflicts = []
-        for i in range(K):
-            for j in range(i+1, K):
-                interf = self.compute_interference(task_vecs[i], task_vecs[j])
-                if interf > self.threshold:
-                    conflicts.append((i, j))
-        
-        # Merge layers
-        all_layers = set()
-        for a in adapters:
-            all_layers.update(a.keys())
-        
-        merged = {}
-        for layer in all_layers:
-            layer_adapts = []
-            layer_weights = []
-            
-            for k, a in enumerate(adapters):
-                if layer in a and hasattr(a[layer], 'get_adaptation'):
-                    layer_adapts.append(a[layer].get_adaptation().detach())
-                    layer_weights.append(weights[k])
-            
-            if not layer_adapts:
-                continue
-            
-            # Orthogonalize conflicts
-            for (i, j) in conflicts:
-                if i < len(layer_adapts) and j < len(layer_adapts):
-                    layer_adapts[i], layer_adapts[j] = self.orthogonalize(layer_adapts[i], layer_adapts[j])
-            
-            # Weighted merge
-            w_norm = [w/sum(layer_weights) for w in layer_weights]
-            merged[layer] = sum(w * a for w, a in zip(w_norm, layer_adapts))
-        
+    return float((u1.t() @ u2).pow(2).sum() / k)
+
+
+class OrthogonalComposer:
+    def __init__(self, eta: float = 0.3, energy: float = 0.95):
+        self.eta = eta
+        self.energy = energy
+        self.report: Dict[str, List[Tuple[int, int, float]]] = {}
+
+    @torch.no_grad()
+    def compose(self, task_deltas: Sequence[Deltas], weights: Optional[Sequence[float]] = None) -> Deltas:
+        weights = list(weights) if weights is not None else [1.0] * len(task_deltas)
+        layers = sorted(set().union(*[d.keys() for d in task_deltas]))
+        merged: Deltas = {}
+        self.report = {}
+        for layer in layers:
+            items = [(t, d[layer]) for t, d in enumerate(task_deltas) if layer in d]
+            accepted: List[Tuple[int, torch.Tensor, torch.Tensor]] = []
+            total = None
+            for t, delta in items:
+                original = delta.reshape(delta.shape[0], -1).float()
+                mat = original
+                for s, mat_s, u_s in accepted:
+                    inter = subspace_interference(mat_s, original, self.energy)
+                    self.report.setdefault(layer, []).append((s, t, inter))
+                    if inter > self.eta and u_s.shape[1]:
+                        mat = mat - u_s @ (u_s.t() @ mat)
+                accepted.append((t, original, _principal_subspace(original, self.energy)))
+                contrib = weights[t] * mat
+                total = contrib if total is None else total + contrib
+            merged[layer] = total.reshape_as(items[0][1]).to(items[0][1].dtype)
         return merged
 
+    def max_interference(self) -> float:
+        values = [v for entries in self.report.values() for _, _, v in entries]
+        return max(values) if values else 0.0
 
-class TaskArithmeticComposer(AdapterComposer):
-    """Task arithmetic composition."""
-    
+
+class NaiveMergeComposer:
+    """Average of task updates."""
+
+    @torch.no_grad()
+    def compose(self, task_deltas: Sequence[Deltas], weights=None) -> Deltas:
+        layers = set().union(*[d.keys() for d in task_deltas])
+        return {l: torch.stack([d[l] for d in task_deltas if l in d]).mean(0) for l in layers}
+
+
+class TaskArithmeticComposer:
+    """``sum_t lambda * Delta W_t``."""
+
     def __init__(self, scaling: float = 1.0):
         self.scaling = scaling
-    
-    def compose(self, adapters: List[Dict[str, nn.Module]], weights: List[float] = None) -> Dict[str, torch.Tensor]:
-        K = len(adapters)
-        if weights is None:
-            weights = [self.scaling] * K
-        
-        all_layers = set()
-        for a in adapters:
-            all_layers.update(a.keys())
-        
+
+    @torch.no_grad()
+    def compose(self, task_deltas: Sequence[Deltas], weights=None) -> Deltas:
+        layers = set().union(*[d.keys() for d in task_deltas])
+        return {l: self.scaling * torch.stack([d[l] for d in task_deltas if l in d]).sum(0) for l in layers}
+
+
+class TIESComposer:
+    """TIES-Merging: trim to the top-``density`` magnitudes, elect signs, disjoint mean."""
+
+    def __init__(self, density: float = 0.2, scaling: float = 1.0):
+        self.density = density
+        self.scaling = scaling
+
+    @torch.no_grad()
+    def compose(self, task_deltas: Sequence[Deltas], weights=None) -> Deltas:
+        layers = set().union(*[d.keys() for d in task_deltas])
         merged = {}
-        for layer in all_layers:
-            combined = None
-            for k, a in enumerate(adapters):
-                if layer in a and hasattr(a[layer], 'get_adaptation'):
-                    adapt = a[layer].get_adaptation().detach()
-                    if combined is None:
-                        combined = weights[k] * adapt
-                    else:
-                        combined = combined + weights[k] * adapt
-            if combined is not None:
-                merged[layer] = combined
-        
+        for l in layers:
+            stack = torch.stack([d[l] for d in task_deltas if l in d]).float()
+            flat = stack.reshape(stack.shape[0], -1)
+            k = max(1, int(self.density * flat.shape[1]))
+            thresh = flat.abs().kthvalue(flat.shape[1] - k + 1, dim=1, keepdim=True).values
+            trimmed = torch.where(flat.abs() >= thresh, flat, torch.zeros_like(flat))
+            sign = torch.sign(trimmed.sum(0))
+            agree = (torch.sign(trimmed) == sign) & (trimmed != 0)
+            count = agree.sum(0).clamp_min(1)
+            mean = (trimmed * agree).sum(0) / count
+            merged[l] = (self.scaling * mean).reshape(stack.shape[1:]).to(task_deltas[0][l].dtype)
         return merged

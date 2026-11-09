@@ -1,0 +1,32 @@
+# GLUE with a Hugging Face encoder. Requires `transformers` and `datasets`.
+model: roberta-base
+max_length: 128
+batch_size: 32
+eval_batch_size: 128
+
+flowra:
+  budget: 0.0087          # B (user parameter 1)
+  eta: 0.3                # composition threshold (user parameter 2)
+  calibration_samples: 512
+  modules_to_save: ["classifier"]   # newly initialised task head, reported separately from B
+
+training:
+  lr: 0.001               # peak of the stable band 5e-4 .. 2e-3
+  weight_decay: 0.0
+  lr_schedule: linear
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+
+epochs:                   # T = epochs * steps_per_epoch; T_ref = 10% warm-up, then every 100 steps
+  cola: 20
+  sst2: 10
+  mrpc: 20
+  qqp: 5
+  stsb: 20
+  mnli: 5
+  qnli: 5
+  rte: 20
+  wnli: 20
+
+seeds: [0, 1, 2, 3, 4]

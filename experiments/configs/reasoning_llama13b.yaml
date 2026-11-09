@@ -1,0 +1,30 @@
+# Code and reasoning on LLaMA-2-13B.
+model: meta-llama/Llama-2-13b-hf
+dtype: bfloat16
+max_length: 512
+batch_size: 1
+eval_batch_size: 1
+lora_rank: 16
+
+flowra:
+  budget: 0.0087
+  eta: 0.3
+  calibration_samples: 512
+  modules_to_save: []
+
+training:
+  lr: 0.001
+  weight_decay: 0.0
+  lr_schedule: linear
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+  max_steps: 6000
+
+eval_every_steps: 1000
+gsm8k_shots: 8
+math_shots: 4
+n_passk_samples: 10
+seeds: [0]
+methods: [full_ft, lora, adalora, dora, adapter, prefix, bitfit, flowra]
+benchmarks: [gsm8k, math, openai_humaneval, mbpp]

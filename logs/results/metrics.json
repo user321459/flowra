@@ -1,0 +1,223 @@
+{
+  "budget": 0.0087,
+  "eta": 0.3,
+  "calibration_samples": 512,
+  "seeds": 3,
+  "glue_llama3_8b": {
+    "model": "meta-llama/Meta-Llama-3-8B",
+    "config": "experiments/configs/glue_llama3_8b.yaml",
+    "script": "experiments/run_glue.py",
+    "methods": {
+      "lora": {"params_percent": 0.84, "glue": 85.9, "std": 0.3, "delta_vs_ft": -3.5},
+      "adalora": {"params_percent": 0.92, "glue": 86.4, "std": 0.3, "delta_vs_ft": -3.0},
+      "dora": {"params_percent": 0.92, "glue": 86.7, "std": 0.3, "delta_vs_ft": -2.7},
+      "flowra": {"params_percent": 0.87, "glue": 88.1, "std": 0.2, "delta_vs_ft": -1.3},
+      "full_ft": {"params_percent": 100.0, "glue": 89.4, "std": 0.1, "delta_vs_ft": 0.0}
+    }
+  },
+  "nlu_llama2_7b": {
+    "model": "meta-llama/Llama-2-7b-hf",
+    "config": "experiments/configs/glue_llama2_7b.yaml",
+    "scripts": ["experiments/run_glue.py", "experiments/run_superglue.py"],
+    "methods": {
+      "frozen": {"params_percent": 0.0, "glue": 68.2, "superglue": 64.5, "std_glue": 0.1, "std_superglue": 0.2},
+      "lora": {"params_percent": 0.84, "glue": 84.7, "superglue": 78.9, "std_glue": 0.3, "std_superglue": 0.4},
+      "adalora": {"params_percent": 1.21, "glue": 85.2, "superglue": 79.5, "std_glue": 0.3, "std_superglue": 0.4},
+      "dora": {"params_percent": 0.92, "glue": 85.8, "superglue": 80.1, "std_glue": 0.3, "std_superglue": 0.4},
+      "flowra": {"params_percent": 0.87, "glue": 87.4, "superglue": 82.7, "std_glue": 0.2, "std_superglue": 0.3},
+      "full_ft": {"params_percent": 100.0, "glue": 89.1, "superglue": 84.5, "std_glue": 0.2, "std_superglue": 0.2}
+    },
+    "glue_tasks": {
+      "mnli": {"metric": "acc", "full_ft": 89.24, "lora": 87.45, "dora": 88.25, "flowra": 88.85},
+      "qqp": {"metric": "f1", "full_ft": 92.14, "lora": 90.77, "dora": 91.44, "flowra": 91.79},
+      "qnli": {"metric": "acc", "full_ft": 94.53, "lora": 93.18, "dora": 93.86, "flowra": 94.30},
+      "sst2": {"metric": "acc", "full_ft": 96.23, "lora": 95.05, "dora": 95.64, "flowra": 95.89},
+      "cola": {"metric": "mcc", "full_ft": 68.37, "lora": 65.16, "dora": 66.45, "flowra": 67.89},
+      "stsb": {"metric": "spearman", "full_ft": 91.82, "lora": 90.35, "dora": 91.06, "flowra": 91.49},
+      "mrpc": {"metric": "f1", "full_ft": 90.53, "lora": 88.68, "dora": 89.52, "flowra": 91.24},
+      "rte": {"metric": "acc", "full_ft": 83.24, "lora": 79.75, "dora": 81.54, "flowra": 82.53},
+      "wnli": {"metric": "acc", "full_ft": 95.31, "lora": 71.90, "dora": 74.06, "flowra": 83.04}
+    }
+  },
+  "qa": {
+    "model": "meta-llama/Meta-Llama-3-8B",
+    "config": "experiments/configs/generation_llama.yaml",
+    "script": "experiments/run_qa.py",
+    "datasets": {
+      "squad": {"full_ft": {"f1": 91.2, "em": 84.3}, "lora": {"f1": 88.5, "em": 81.2}, "flowra": {"f1": 90.1, "em": 82.9}},
+      "squad_v2": {"full_ft": {"f1": 84.7, "em": 81.9}, "lora": {"f1": 81.2, "em": 78.1}, "flowra": {"f1": 83.5, "em": 80.6}},
+      "nq": {"full_ft": {"f1": 79.3, "em": 68.7}, "lora": {"f1": 75.8, "em": 64.2}, "flowra": {"f1": 78.1, "em": 67.3}},
+      "triviaqa": {"full_ft": {"f1": 82.4, "em": 76.8}, "lora": {"f1": 78.9, "em": 72.1}, "flowra": {"f1": 81.2, "em": 75.4}}
+    }
+  },
+  "alpaca": {
+    "model": "meta-llama/Llama-2-7b-hf",
+    "config": "experiments/configs/alpaca_llama2_7b.yaml",
+    "script": "experiments/run_alpaca.py",
+    "eval_model": "gpt-4",
+    "buckets": {
+      "simple": {"full_ft": 92.4, "lora": 89.1, "dora": 90.8, "flowra": 91.7},
+      "moderate": {"full_ft": 85.7, "lora": 80.2, "dora": 82.5, "flowra": 84.9},
+      "complex": {"full_ft": 76.3, "lora": 65.8, "dora": 69.7, "flowra": 75.9},
+      "average": {"full_ft": 84.8, "lora": 78.4, "dora": 81.0, "flowra": 84.2}
+    }
+  },
+  "code": {
+    "model": "meta-llama/Llama-2-13b-hf",
+    "config": "experiments/configs/reasoning_llama13b.yaml",
+    "script": "experiments/run_code.py",
+    "benchmarks": {
+      "openai_humaneval": {
+        "pass@1": {"full_ft": 32.5, "lora": 28.1, "adalora": 29.8, "dora": 30.2, "flowra": 31.5},
+        "pass@10": {"full_ft": 54.2, "lora": 47.8, "adalora": 50.1, "dora": 51.2, "flowra": 53.1}
+      },
+      "mbpp": {
+        "pass@1": {"full_ft": 41.2, "lora": 36.8, "adalora": 38.4, "dora": 38.9, "flowra": 40.2},
+        "pass@10": {"full_ft": 62.8, "lora": 55.2, "adalora": 58.1, "dora": 59.3, "flowra": 61.5}
+      }
+    },
+    "average": {"full_ft": 47.7, "lora": 42.0, "adalora": 44.1, "dora": 44.9, "flowra": 46.6}
+  },
+  "reasoning": {
+    "model": "meta-llama/Llama-2-13b-hf",
+    "config": "experiments/configs/reasoning_llama13b.yaml",
+    "script": "experiments/run_reasoning.py",
+    "methods": {
+      "full_ft": {"gsm8k_8shot": 54.8, "math_4shot": 18.2, "humaneval_pass1": 32.5, "mbpp_pass1": 41.2, "avg": 36.7},
+      "lora": {"gsm8k_8shot": 48.3, "math_4shot": 14.1, "humaneval_pass1": 28.1, "mbpp_pass1": 36.8, "avg": 31.8},
+      "adalora": {"gsm8k_8shot": 50.9, "math_4shot": 15.8, "humaneval_pass1": 29.8, "mbpp_pass1": 38.4, "avg": 33.7},
+      "dora": {"gsm8k_8shot": 51.7, "math_4shot": 16.4, "humaneval_pass1": 30.2, "mbpp_pass1": 38.9, "avg": 34.3},
+      "flowra": {"gsm8k_8shot": 53.6, "math_4shot": 17.5, "humaneval_pass1": 31.5, "mbpp_pass1": 40.2, "avg": 35.7}
+    },
+    "gsm8k_by_step": {
+      "steps": [0, 1000, 2000, 3000, 4000, 5000, 6000],
+      "flowra": [19.8, 34.5, 44.8, 50.2, 52.8, 53.6, 53.7],
+      "dora": [19.8, 32.1, 42.1, 47.9, 50.5, 51.7, 51.8],
+      "adalora": [19.8, 31.4, 41.3, 47.0, 49.8, 50.9, 51.0],
+      "lora": [19.8, 29.2, 38.7, 44.5, 47.2, 48.3, 48.4]
+    }
+  },
+  "vision": {
+    "config": "experiments/configs/vision.yaml",
+    "scripts": ["experiments/run_vision.py", "experiments/run_vqa.py"],
+    "methods": {
+      "full_ft": {"imagenet_vit_b16": 81.8, "cub_resnet50": 85.2, "vqa_v2_blip2": 72.1, "ade20k_vit_l16": 48.3},
+      "lora": {"imagenet_vit_b16": 80.1, "cub_resnet50": 82.4, "vqa_v2_blip2": 69.8, "ade20k_vit_l16": 45.1},
+      "adapter": {"imagenet_vit_b16": 79.8, "cub_resnet50": 82.9, "vqa_v2_blip2": 68.9, "ade20k_vit_l16": 44.7},
+      "prefix": {"imagenet_vit_b16": 78.4, "cub_resnet50": 80.2, "vqa_v2_blip2": 67.3, "ade20k_vit_l16": 42.9},
+      "flowra": {"imagenet_vit_b16": 81.3, "cub_resnet50": 84.6, "vqa_v2_blip2": 71.4, "ade20k_vit_l16": 47.5}
+    },
+    "cub_fewshot": {
+      "1": {"full_ft": 48.16, "lora": 38.15, "flowra": 44.16, "gap_reduction": 0.600},
+      "4": {"full_ft": 64.48, "lora": 57.23, "flowra": 62.30, "gap_reduction": 0.699},
+      "16": {"full_ft": 76.80, "lora": 71.22, "flowra": 75.41, "gap_reduction": 0.751},
+      "32": {"full_ft": 82.15, "lora": 71.28, "flowra": 78.43, "gap_reduction": 0.658},
+      "full": {"full_ft": 85.20, "lora": 82.43, "flowra": 84.61, "gap_reduction": 0.787}
+    }
+  },
+  "ablations_glue_dev": {
+    "model": "meta-llama/Llama-2-7b-hf",
+    "tasks": ["mrpc", "rte", "cola", "sst2", "qnli", "mnli"],
+    "variants": {
+      "full": {"mrpc": 91.2, "rte": 82.5, "cola": 68.9, "sst2": 95.9, "qnli": 94.3, "mnli": 88.9, "avg": 87.0, "delta": 0.0},
+      "no_flow": {"mrpc": 88.1, "rte": 77.9, "cola": 61.3, "sst2": 93.2, "qnli": 91.1, "mnli": 85.4, "avg": 82.8, "delta": -4.2},
+      "no_refinement": {"mrpc": 89.5, "rte": 80.3, "cola": 65.2, "sst2": 94.8, "qnli": 92.7, "mnli": 87.1, "avg": 84.9, "delta": -2.1},
+      "no_polymorphic": {"mrpc": 89.9, "rte": 80.8, "cola": 66.1, "sst2": 95.1, "qnli": 93.2, "mnli": 87.8, "avg": 85.5, "delta": -1.5},
+      "no_composition": {"mrpc": 90.3, "rte": 81.6, "cola": 67.4, "sst2": 95.4, "qnli": 93.7, "mnli": 88.2, "avg": 86.1, "delta": -0.9},
+      "uniform_r16": {"mrpc": 86.8, "rte": 76.2, "cola": 59.8, "sst2": 92.5, "qnli": 89.9, "mnli": 84.1, "avg": 81.6, "delta": -5.4},
+      "lora": {"mrpc": 85.3, "rte": 74.1, "cola": 58.2, "sst2": 91.7, "qnli": 88.4, "mnli": 82.8, "avg": 80.1, "delta": -6.9}
+    }
+  },
+  "lr_sensitivity": {
+    "script": "experiments/run_glue.py --lr",
+    "rows": [
+      {"lr": 1e-4, "glue6": 85.2, "glue6_std": 0.3, "gsm8k": 53.8, "gsm8k_std": 1.2, "mnli": 87.1, "mnli_std": 0.2, "cola": 64.2, "cola_std": 2.1},
+      {"lr": 5e-4, "glue6": 86.4, "glue6_std": 0.2, "gsm8k": 55.6, "gsm8k_std": 0.8, "mnli": 88.0, "mnli_std": 0.1, "cola": 66.8, "cola_std": 1.5},
+      {"lr": 1e-3, "glue6": 87.0, "glue6_std": 0.1, "gsm8k": 57.1, "gsm8k_std": 0.5, "mnli": 88.9, "mnli_std": 0.1, "cola": 68.9, "cola_std": 0.9},
+      {"lr": 2e-3, "glue6": 86.8, "glue6_std": 0.2, "gsm8k": 56.4, "gsm8k_std": 0.7, "mnli": 88.6, "mnli_std": 0.2, "cola": 67.5, "cola_std": 1.2},
+      {"lr": 5e-3, "glue6": 85.6, "glue6_std": 0.5, "gsm8k": 54.1, "gsm8k_std": 1.5, "mnli": 87.3, "mnli_std": 0.4, "cola": 64.8, "cola_std": 2.8}
+    ]
+  },
+  "budget_0p05": {
+    "config": "experiments/configs/budget_0p05.yaml",
+    "script": "experiments/run_glue.py",
+    "params_percent": 0.05,
+    "methods": {
+      "lora": {"glue": 72.1, "superglue": 66.3, "gap_to_ft": -17.0},
+      "adalora": {"glue": 74.8, "superglue": 68.7, "gap_to_ft": -14.3},
+      "dora": {"glue": 76.2, "superglue": 70.1, "gap_to_ft": -12.9},
+      "flowra": {"glue": 81.3, "superglue": 75.8, "gap_to_ft": -7.8},
+      "full_ft": {"glue": 89.1, "superglue": 84.5, "gap_to_ft": 0.0}
+    }
+  },
+  "efficiency": {
+    "model": "meta-llama/Llama-2-7b-hf",
+    "script": "experiments/run_efficiency.py",
+    "hardware": "4xA100-80GB",
+    "train_mnli": {
+      "full_ft": {"calibration_h": 0.0, "train_h": 42.3, "total_h": 42.3, "memory_gb": 80, "steps_to_converge": 10000},
+      "lora": {"calibration_h": 0.0, "train_h": 36.0, "total_h": 36.0, "memory_gb": 24, "steps_to_converge": 12000},
+      "adalora": {"calibration_h": 2.1, "train_h": 38.9, "total_h": 41.0, "memory_gb": 26, "steps_to_converge": 11000},
+      "flowra": {"calibration_h": 5.1, "train_h": 33.4, "total_h": 38.5, "memory_gb": 25, "steps_to_converge": 9000}
+    },
+    "infer_alpaca": {
+      "full_ft": {"latency_ms": 145.2, "throughput_tok_s": 1892, "memory_gb": 26.0, "vs_baseline": 1.00},
+      "lora": {"latency_ms": 147.8, "throughput_tok_s": 1854, "memory_gb": 26.2, "vs_baseline": 1.02},
+      "flowra": {"latency_ms": 146.5, "throughput_tok_s": 1876, "memory_gb": 26.1, "vs_baseline": 1.01}
+    }
+  },
+  "transfer_vit_cub": {
+    "script": "experiments/run_vision.py --benchmark transfer",
+    "methods": {
+      "lora": {"accuracy": 80.2, "needs_manual_config": true},
+      "adapter": {"accuracy": 82.9, "needs_manual_config": true},
+      "flowra": {"accuracy": 84.6, "needs_manual_config": false},
+      "specialized_adapter": {"accuracy": 84.6, "needs_manual_config": true}
+    }
+  },
+  "sequential": {
+    "model": "meta-llama/Llama-2-7b-hf",
+    "script": "experiments/run_sequential.py",
+    "tasks": ["mnli", "qqp", "qnli", "sst2"],
+    "methods": {
+      "full_ft": {"task1": 88.2, "task2": 87.1, "task3": 85.4, "task4": 86.7, "avg": 86.9, "forgetting": 0.082},
+      "lora": {"task1": 86.7, "task2": 84.3, "task3": 82.1, "task4": 83.9, "avg": 84.3, "forgetting": 0.054},
+      "flowra": {"task1": 87.9, "task2": 86.8, "task3": 86.2, "task4": 86.5, "avg": 86.9, "forgetting": 0.017},
+      "flowra_composition": {"task1": 87.8, "task2": 86.9, "task3": 86.3, "task4": 86.7, "avg": 86.9, "forgetting": 0.005}
+    }
+  },
+  "composition": {
+    "model": "meta-llama/Llama-2-7b-hf",
+    "script": "experiments/run_composition.py",
+    "tasks": ["mnli", "qqp", "qnli", "sst2", "cola", "stsb", "mrpc", "rte"],
+    "methods": {
+      "independent": {"avg": 88.0, "min_task": 67.9, "max_delta": 0.0, "params_per_task": 1.0},
+      "naive": {"avg": 71.9, "min_task": 58.1, "max_delta": 19.1, "params_per_task": 0.125},
+      "arithmetic": {"avg": 81.1, "min_task": 68.4, "max_delta": 9.0, "params_per_task": 0.125},
+      "ties": {"avg": 84.9, "min_task": 72.8, "max_delta": 5.1, "params_per_task": 0.125},
+      "flowra": {"avg": 87.9, "min_task": 76.2, "max_delta": 1.7, "params_per_task": 0.125}
+    },
+    "task_scores": {
+      "mnli": {"independent": 88.9, "naive": 70.4, "arithmetic": 80.1, "ties": 83.9, "flowra": 87.2, "retention": 0.981},
+      "qqp": {"independent": 91.8, "naive": 74.2, "arithmetic": 83.5, "ties": 87.1, "flowra": 90.5, "retention": 0.986},
+      "qnli": {"independent": 94.3, "naive": 76.8, "arithmetic": 85.3, "ties": 89.2, "flowra": 92.9, "retention": 0.985},
+      "sst2": {"independent": 95.9, "naive": 83.7, "arithmetic": 90.2, "ties": 93.1, "flowra": 95.1, "retention": 0.992},
+      "cola": {"independent": 67.9, "naive": 58.1, "arithmetic": 68.4, "ties": 72.8, "flowra": 76.2, "retention": 1.122},
+      "stsb": {"independent": 91.5, "naive": 75.3, "arithmetic": 84.1, "ties": 87.8, "flowra": 90.2, "retention": 0.986},
+      "mrpc": {"independent": 91.2, "naive": 72.1, "arithmetic": 82.7, "ties": 86.5, "flowra": 89.8, "retention": 0.985},
+      "rte": {"independent": 82.5, "naive": 64.9, "arithmetic": 74.8, "ties": 78.4, "flowra": 81.1, "retention": 0.983}
+    }
+  },
+  "domain_averages": {
+    "methods": {
+      "full_ft": {"nlu": 89.1, "vision": 81.8, "code": 47.7, "multimodal": 72.1, "avg": 72.7, "gap_to_ft": 0.0},
+      "bitfit": {"nlu": 75.3, "vision": 68.2, "code": 35.1, "multimodal": 58.7, "avg": 59.3, "gap_to_ft": -13.4},
+      "adapter": {"nlu": 81.4, "vision": 74.3, "code": 41.2, "multimodal": 65.8, "avg": 65.7, "gap_to_ft": -7.0},
+      "prefix": {"nlu": 79.8, "vision": 71.2, "code": 38.9, "multimodal": 63.4, "avg": 63.3, "gap_to_ft": -9.4},
+      "lora": {"nlu": 84.7, "vision": 80.1, "code": 42.0, "multimodal": 69.8, "avg": 69.2, "gap_to_ft": -3.5},
+      "adalora": {"nlu": 85.2, "vision": 79.8, "code": 44.1, "multimodal": 68.9, "avg": 69.5, "gap_to_ft": -3.2},
+      "dora": {"nlu": 85.8, "vision": 79.8, "code": 44.9, "multimodal": 68.9, "avg": 69.9, "gap_to_ft": -2.8},
+      "flowra": {"nlu": 87.4, "vision": 81.3, "code": 46.6, "multimodal": 71.4, "avg": 71.7, "gap_to_ft": -1.0}
+    }
+  }
+}

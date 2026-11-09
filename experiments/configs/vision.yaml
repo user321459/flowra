@@ -1,0 +1,40 @@
+# ViT-B/16 ImageNet, ResNet-50 CUB-200, ViT-L/16 ADE20K, ViT transfer.
+imagenet_model: vit_base_patch16_224
+cub_model: resnet50
+ade20k_model: vit_large_patch16_224.augreg_in21k   # SETR-Naive ViT-L/16, ImageNet-21k
+transfer_model: vit_base_patch16_224
+num_imagenet_classes: 1000
+num_cub_classes: 200
+num_ade20k_classes: 150
+ade20k_ignore_index: 255
+image_size: 224
+seg_image_size: 512
+batch_size: 32
+eval_batch_size: 64
+lora_rank: 16
+
+flowra:
+  budget: 0.0087
+  eta: 0.3
+  calibration_samples: 512
+  modules_to_save: ["fc", "head"]
+
+training:
+  lr: 0.001
+  weight_decay: 0.0
+  lr_schedule: cosine
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+  epochs: 10
+  ade20k_lr_schedule: poly     # SETR poly, power 0.9
+
+ade20k_epochs: 80              # SETR-Naive ADE20K schedule (crop 512)
+few_shot: [1, 4, 16, 32]
+seeds: [0, 1, 2]
+methods: [full_ft, lora, adapter, prefix, bitfit, flowra]
+prefix_tokens: 20
+visual_prompt_pad: 16          # padded visual prompt on ResNet
+adapter_reduction: 16
+# Local dataset roots (ImageNet ILSVRC layout; CUB-200-2011; ADEChallengeData2016).
+data_dir: ""

@@ -1,0 +1,34 @@
+# SuperGLUE on LLaMA-2-7B.
+model: meta-llama/Llama-2-7b-hf
+dtype: bfloat16
+max_length: 256
+batch_size: 1
+eval_batch_size: 4
+lora_rank: 16
+
+flowra:
+  budget: 0.0087
+  eta: 0.3
+  calibration_samples: 512
+  modules_to_save: ["score"]
+
+training:
+  lr: 0.001
+  weight_decay: 0.0
+  lr_schedule: linear
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+
+epochs:
+  boolq: 5
+  cb: 20
+  copa: 20
+  multirc: 10
+  record: 5
+  rte: 20
+  wic: 10
+  wsc: 20
+
+seeds: [0, 1, 2]
+methods: [frozen, lora, adalora, dora, adapter, prefix, bitfit, flowra, full_ft]

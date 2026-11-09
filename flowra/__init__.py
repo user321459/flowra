@@ -1,153 +1,79 @@
 """
-FLOWRA: Flow-based Low-Rank Adaptation Framework
-=================================================
+FLowRA: Flow-Guided Rank Allocation for Parameter-Efficient Fine-Tuning.
 
-A unified information flow analysis framework for optimizing low-rank adaptations
-in neural networks. Implements spectral-aware rank allocation, polymorphic adapters,
-progressive subspace refinement, orthogonal composition, and flow-aware initialization.
-
-Version: 0.1.0
+Calibration computes a flow-change descriptor ``D_l`` of hidden-state
+trajectories and a layer criticality ``C_l = |D_l| ||grad_{h_l} L||_2 ||W_l||_F``.
+Ranks are allocated under a trainable-parameter budget ``B`` and refined during
+training from updated gradient statistics. User-configurable parameters: the
+budget ``B`` and the composition threshold ``eta``.
 """
 
-__version__ = "0.1.0"
-__author__ = "Team"
-__license__ = "MIT"
+__version__ = "1.0.0"
 
-# Core framework
-from flowra.core.framework import FLOWRA
-from flowra.core.analysis import FlowAnalyzer, FlowProfile, LayerFlowInfo
+from flowra.algorithms import (
+    NaiveMergeComposer,
+    OrthogonalComposer,
+    RankRefiner,
+    TaskArithmeticComposer,
+    TIESComposer,
+    adapter_deltas,
+    allocate_ranks,
+    apply_deltas,
+    generate_block_blueprint,
+    refinement_schedule,
+)
+from flowra.configs import FlowConfig, TrainingConfig
 from flowra.core.adapters import (
-    BaseAdapter,
-    LoRAAdapter,
+    BlockLoRA,
+    DoRALinear,
+    GatedRNNAdapter,
+    LoRAConv,
     LoRALinear,
-    LoRAConv2d,
-    AttentionAdapter,
-    MultiHeadAttentionAdapter,
-    NormalizationAdapter,
-    LayerNormAdapter,
-    BatchNormAdapter,
-    AdapterFactory,
+    LowRankFactors,
+    NormAffineAdapter,
     PolymorphicAdapterFactory,
 )
-from flowra.core.training import (
-    FlowraTrainer,
-    TrainingConfig,
-    TrainingCallback,
-    EarlyStoppingCallback,
-    CheckpointCallback,
-    LoggingCallback,
+from flowra.core.analysis import (
+    CalibrationProfile,
+    FlowProfiler,
+    ModuleProfile,
+    align_states,
+    flow_change,
+    get_handler,
 )
-
-# Algorithms
-from flowra.algorithms.allocation import (
-    RankAllocator,
-    SpectralRankAllocator,
-    UniformRankAllocator,
-    AdaptiveRankAllocator,
-)
-from flowra.algorithms.refinement import (
-    SubspaceRefiner,
-    ProgressiveSubspaceRefiner,
-    GradientSubspaceTracker,
-)
-from flowra.algorithms.composition import (
-    AdapterComposer,
-    OrthogonalComposer,
-    LinearComposer,
-    TaskArithmeticComposer,
-)
-from flowra.algorithms.initialization import (
-    AdapterInitializer,
-    FlowAwareInitializer,
-    KaimingInitializer,
-    SVDInitializer,
-)
-
-# Configs
-from flowra.configs import (
-    FlowConfig,
-    AdapterConfig,
-    TrainingConfig,
-    AnalysisConfig,
-    CompositionConfig,
-)
-
-# Utils
-from flowra.utils import (
-    save_adapter,
-    load_adapter,
-    count_parameters,
-    get_layer_info,
-    merge_adapters_into_model,
-)
+from flowra.core.framework import FLOWRA
+from flowra.core.training import FlowraTrainer
+from flowra.utils.logging_utils import ExperimentLogger
 
 __all__ = [
-    # Version
     "__version__",
-    # Core
     "FLOWRA",
-    "FlowAnalyzer",
-    "FlowProfile",
-    "LayerFlowInfo",
-    # Adapters
-    "BaseAdapter",
-    "LoRAAdapter",
-    "LoRALinear",
-    "LoRAConv2d",
-    "AttentionAdapter",
-    "MultiHeadAttentionAdapter",
-    "NormalizationAdapter",
-    "LayerNormAdapter",
-    "BatchNormAdapter",
-    "AdapterFactory",
-    "PolymorphicAdapterFactory",
-    # Training
-    "FlowraTrainer",
-    "TrainingConfig",
-    "TrainingCallback",
-    "EarlyStoppingCallback",
-    "CheckpointCallback",
-    "LoggingCallback",
-    # Algorithms
-    "RankAllocator",
-    "SpectralRankAllocator",
-    "UniformRankAllocator",
-    "AdaptiveRankAllocator",
-    "SubspaceRefiner",
-    "ProgressiveSubspaceRefiner",
-    "GradientSubspaceTracker",
-    "AdapterComposer",
-    "OrthogonalComposer",
-    "LinearComposer",
-    "TaskArithmeticComposer",
-    "AdapterInitializer",
-    "FlowAwareInitializer",
-    "KaimingInitializer",
-    "SVDInitializer",
-    # Configs
     "FlowConfig",
-    "AdapterConfig",
-    "AnalysisConfig",
-    "CompositionConfig",
-    # Utils
-    "save_adapter",
-    "load_adapter",
-    "count_parameters",
-    "get_layer_info",
-    "merge_adapters_into_model",
+    "TrainingConfig",
+    "FlowProfiler",
+    "CalibrationProfile",
+    "ModuleProfile",
+    "flow_change",
+    "align_states",
+    "get_handler",
+    "allocate_ranks",
+    "generate_block_blueprint",
+    "RankRefiner",
+    "refinement_schedule",
+    "OrthogonalComposer",
+    "NaiveMergeComposer",
+    "TaskArithmeticComposer",
+    "TIESComposer",
+    "adapter_deltas",
+    "apply_deltas",
+    "LowRankFactors",
+    "LoRALinear",
+    "DoRALinear",
+    "LoRAConv",
+    "BlockLoRA",
+    "GatedRNNAdapter",
+    "NormAffineAdapter",
+    "PolymorphicAdapterFactory",
+    "FlowraTrainer",
+    "ExperimentLogger",
 ]
-
-
-def get_version():
-    """Return the current version of FLOWRA."""
-    return __version__
-
-
-def get_device():
-    """Get the best available device."""
-    import torch
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")

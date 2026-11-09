@@ -1,0 +1,27 @@
+# VQA v2 with BLIP-2.
+model: Salesforce/blip2-opt-2.7b
+dtype: bfloat16
+max_length: 32
+batch_size: 1
+eval_batch_size: 1
+lora_rank: 16
+
+flowra:
+  budget: 0.0087
+  eta: 0.3
+  calibration_samples: 512
+  modules_to_save: []
+
+training:
+  lr: 0.001
+  weight_decay: 0.0
+  lr_schedule: linear
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+  max_steps: 4000
+
+seeds: [0, 1, 2]
+methods: [full_ft, lora, adapter, prefix, bitfit, flowra]
+prefix_tokens: 20
+adapter_reduction: 16

@@ -1,0 +1,58 @@
+{
+  "spearman": {
+    "D_abs_vs_SVD": {
+      "rho": 0.38000117192077815,
+      "p": 7.18900740828432e-07
+    },
+    "C_vs_SVD": {
+      "rho": 0.709999414039611,
+      "p": 7.659978891630799e-26
+    },
+    "G_vs_SVD": {
+      "rho": 0.6575090823860308,
+      "p": 3.587738773287334e-21
+    },
+    "D_abs_vs_G": {
+      "rho": 0.48015645142388375,
+      "p": 1.318709963334883e-10
+    }
+  },
+  "per_type": {
+    "Attn Output (O)": {
+      "D_abs": 0.82999996875,
+      "G": 0.69,
+      "svd_importance": 0.7399999687500002,
+      "C": 0.92
+    },
+    "Query/Key (Q/K)": {
+      "D_abs": 0.6099999687499998,
+      "G": 0.71999996875,
+      "svd_importance": 0.78,
+      "C": 0.8500000000000001
+    },
+    "Value (V)": {
+      "D_abs": 0.45,
+      "G": 0.5800000624999999,
+      "svd_importance": 0.61000003125,
+      "C": 0.6799999999999999
+    },
+    "FFN Final": {
+      "D_abs": 0.7899999375,
+      "G": 0.66999996875,
+      "svd_importance": 0.7099999375000001,
+      "C": 0.8899999687499999
+    },
+    "FFN Intermediate": {
+      "D_abs": 0.5199999375000001,
+      "G": 0.5499999999999999,
+      "svd_importance": 0.5900000937499998,
+      "C": 0.65999996875
+    }
+  },
+  "num_layers": 160,
+  "num_transformer_blocks": 32,
+  "num_samples": 512,
+  "model": "meta-llama/Llama-2-7b-hf",
+  "task": "mnli",
+  "note": "One row per transformer block and layer type (32 x 5 = 160). Type-level means are averages of the normalised scores; Spearman correlations use the 160 individual observations before aggregation."
+}

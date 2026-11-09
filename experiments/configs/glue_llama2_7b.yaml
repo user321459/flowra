@@ -1,0 +1,39 @@
+# LLaMA-2-7B NLU / composition / efficiency.
+model: meta-llama/Llama-2-7b-hf
+dtype: bfloat16
+max_length: 128
+batch_size: 1
+eval_batch_size: 4
+lora_rank: 16
+prefix_tokens: 20
+adapter_reduction: 16
+
+flowra:
+  budget: 0.0087
+  eta: 0.3
+  calibration_samples: 512
+  modules_to_save: ["score"]
+
+training:
+  lr: 0.001
+  weight_decay: 0.0
+  lr_schedule: linear
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+
+epochs:
+  cola: 20
+  sst2: 10
+  mrpc: 20
+  qqp: 5
+  stsb: 20
+  mnli: 5
+  qnli: 5
+  rte: 20
+  wnli: 20
+
+seeds: [0, 1, 2]
+methods: [full_ft, lora, adalora, dora, adapter, prefix, bitfit, flowra, frozen]
+sequential_tasks: [mnli, qqp, qnli, sst2]
+composition_tasks: [mnli, qqp, qnli, sst2, cola, stsb, mrpc, rte]

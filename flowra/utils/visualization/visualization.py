@@ -1,5 +1,5 @@
 """
-Reusable plotting functions for FLOWRA research paper figures.
+Reusable plotting functions for FLowRA figures.
 """
 
 import matplotlib.pyplot as plt
@@ -33,7 +33,7 @@ GRADIENT_HEAT = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6
 # ============================================================================
 
 def setup_style(font_size: int = 10, use_latex: bool = False):
-    """Configure matplotlib style for publication-quality figures."""
+    """Configure matplotlib style."""
     plt.style.use('seaborn-v0_8-whitegrid')
     
     config = {

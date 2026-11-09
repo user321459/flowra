@@ -1,140 +1,90 @@
 """
-Subspace Refinement Algorithms
+Dynamic rank refinement during training.
 
-Progressive Subspace Refinement
+The calibration descriptor ``D~_l`` stays fixed. At every step ``t in T_ref``
+the gradient factor is updated,
+
+    C_l(t) = D~_l * ||grad_{h_l} L_t||_2 * ||W_l||_F,
+
+and the ranks are re-allocated under the same total budget ``B_total``.
+Applying the new ranks to the adapters (retaining existing components,
+initialising new ones) is done by
+:meth:`flowra.core.adapters.base.LowRankFactors.resize`.
+
+Default schedule: warm-up of 10% of the training steps ``T`` followed by a
+refinement every 100 steps.
 """
 
-import torch
-import torch.nn as nn
-from typing import Dict, List, Optional
-from abc import ABC, abstractmethod
 import math
+from typing import Callable, Dict, List, Mapping, Optional, Tuple
+
+from flowra.algorithms.allocation.allocation import AllocationResult, Shape, allocate_ranks
+
+Adjuster = Callable[[AllocationResult, Mapping[str, float], Mapping[str, Shape], Mapping[str, float]], AllocationResult]
 
 
-class SubspaceRefiner(ABC):
-    """Base class for subspace refinement."""
-    
-    @abstractmethod
-    def refine(self, adapters: Dict[str, nn.Module], step: int) -> Dict[str, int]:
-        pass
+def refinement_schedule(total_steps: int, warmup_ratio: float = 0.1, interval: int = 100) -> List[int]:
+    """``T_ref = {w, w + interval, w + 2 interval, ...} ∩ [0, T)`` with ``w = ceil(warmup_ratio * T)``."""
+    if total_steps <= 0 or interval <= 0:
+        return []
+    start = max(1, math.ceil(warmup_ratio * total_steps))
+    return list(range(start, total_steps, interval))
 
 
-class ProgressiveSubspaceRefiner(SubspaceRefiner):
+class RankRefiner:
     """
-    Progressive Subspace Refinement
-    
-    Tracks effective gradient dimension and prunes inactive components.
+    Budget-preserving re-allocation from updated criticality scores.
+
+    Args:
+        descriptor_abs: fixed calibration descriptors ``D~_l``.
+        weight_norms: ``||W_l||_F``.
+        shapes: ``(m_l, n_l)``.
+        budget: ``B_total``.
+        gamma: allocation exponent.
+        use_flow: if ``False`` the criticality omits ``D~_l`` (ablation).
+        initial_grad_norms: calibration gradient norms, used for layers whose
+            gradient is unavailable at step ``t``.
     """
-    
-    def __init__(self, epsilon: float = 0.1, warmup: int = 100, min_rank_fraction: float = 0.25):
-        self.epsilon = epsilon
-        self.warmup = warmup
-        self.min_rank_fraction = min_rank_fraction
-        self.effective_dims: List[float] = []
-        self.prev_dim: Optional[float] = None
-        self.initial_ranks: Dict[str, int] = {}
-    
-    def compute_effective_dim(self, adapters: Dict[str, nn.Module]) -> float:
-        """Compute global effective gradient dimension."""
-        all_sv = []
-        for adapter in adapters.values():
-            if hasattr(adapter, 'B') and hasattr(adapter, 'A'):
-                with torch.no_grad():
-                    W = adapter.B @ adapter.A
-                    try:
-                        _, sv, _ = torch.linalg.svd(W.float(), full_matrices=False)
-                        all_sv.append(sv.cpu())
-                    except:
-                        pass
-        
-        if not all_sv:
-            return 1.0
-        
-        sv = torch.cat(all_sv).clamp(min=1e-10)
-        return ((sv.sum() ** 2) / (sv ** 2).sum()).item()
-    
-    def refine(self, adapters: Dict[str, nn.Module], step: int) -> Dict[str, int]:
-        if step < self.warmup:
-            return {}
-        
-        # Store initial ranks
-        if not self.initial_ranks:
-            for name, adapter in adapters.items():
-                if hasattr(adapter, 'rank'):
-                    self.initial_ranks[name] = adapter.rank
-        
-        d_eff = self.compute_effective_dim(adapters)
-        self.effective_dims.append(d_eff)
-        
-        if self.prev_dim is not None:
-            change = abs(d_eff - self.prev_dim)
-            if change < self.epsilon * self.prev_dim:
-                return {}
-        
-        self.prev_dim = d_eff
-        changes = {}
-        
-        for name, adapter in adapters.items():
-            if not hasattr(adapter, 'B') or not hasattr(adapter, 'A'):
-                continue
-            
-            with torch.no_grad():
-                B, A = adapter.B.data, adapter.A.data
-                try:
-                    W = B @ A
-                    U, sv, Vh = torch.linalg.svd(W.float(), full_matrices=False)
-                except:
-                    continue
-                
-                if sv[0] > 0:
-                    relative = sv / sv[0]
-                    threshold = d_eff / self.initial_ranks.get(name, adapter.rank)
-                    keep = (relative >= threshold).sum().item()
-                    
-                    min_rank = max(1, int(self.initial_ranks.get(name, adapter.rank) * self.min_rank_fraction))
-                    new_rank = max(min_rank, keep)
-                    
-                    if new_rank < adapter.rank:
-                        adapter.B.data = (U[:, :new_rank] @ torch.diag(sv[:new_rank].sqrt())).to(adapter.B.dtype)
-                        adapter.A.data = (torch.diag(sv[:new_rank].sqrt()) @ Vh[:new_rank, :]).to(adapter.A.dtype)
-                        adapter.rank = new_rank
-                        changes[name] = new_rank
-        
-        return changes
 
-
-class GradientSubspaceTracker:
-    """Track gradient subspace evolution."""
-    
-    def __init__(self, max_rank: int = 100, decay: float = 0.99):
+    def __init__(
+        self,
+        descriptor_abs: Mapping[str, float],
+        weight_norms: Mapping[str, float],
+        shapes: Mapping[str, Tuple[int, int]],
+        budget: int,
+        gamma: float = 1.0,
+        use_flow: bool = True,
+        initial_grad_norms: Optional[Mapping[str, float]] = None,
+        max_rank: Optional[int] = None,
+        adjuster: Optional[Adjuster] = None,
+    ):
+        self.descriptor_abs = dict(descriptor_abs)
+        self.weight_norms = dict(weight_norms)
+        self.shapes = dict(shapes)
+        self.budget = int(budget)
+        self.gamma = gamma
+        self.use_flow = use_flow
         self.max_rank = max_rank
-        self.decay = decay
-        self.U: Optional[torch.Tensor] = None
-        self.S: Optional[torch.Tensor] = None
-        self.step = 0
-    
-    def update(self, gradient: torch.Tensor):
-        grad = gradient.flatten().float()
-        
-        if self.U is None:
-            self.U = grad.unsqueeze(1) / (grad.norm() + 1e-10)
-            self.S = torch.tensor([grad.norm()])
-        else:
-            proj = self.U.T @ grad
-            residual = grad - self.U @ proj
-            res_norm = residual.norm()
-            
-            if res_norm > 0.01 * grad.norm() and self.U.size(1) < self.max_rank:
-                self.U = torch.cat([self.U, residual.unsqueeze(1) / res_norm], dim=1)
-                self.S = torch.cat([self.decay * self.S, res_norm.unsqueeze(0)])
-            else:
-                self.S = self.decay * self.S
-        
-        self.step += 1
-    
-    def get_effective_rank(self) -> float:
-        if self.S is None:
-            return 0.0
-        s_sum = self.S.sum()
-        s_sq = (self.S ** 2).sum()
-        return (s_sum ** 2 / s_sq).item() if s_sq > 0 else 0.0
+        self.adjuster = adjuster
+        self.last_grad_norms: Dict[str, float] = dict(initial_grad_norms or {})
+        self.history: List[Dict] = []
+
+    def criticality(self, grad_norms: Mapping[str, float]) -> Dict[str, float]:
+        for name, g in grad_norms.items():
+            if g is not None and math.isfinite(g):
+                self.last_grad_norms[name] = float(g)
+        crit = {}
+        for name in self.shapes:
+            g = self.last_grad_norms.get(name, 0.0)
+            d = self.descriptor_abs.get(name, 0.0) if self.use_flow else 1.0
+            crit[name] = d * g * self.weight_norms.get(name, 0.0)
+        return crit
+
+    def refine(self, step: int, grad_norms: Mapping[str, float]) -> AllocationResult:
+        crit = self.criticality(grad_norms)
+        result = allocate_ranks(crit, self.shapes, self.budget, gamma=self.gamma, max_rank=self.max_rank)
+        if self.adjuster is not None:
+            result = self.adjuster(result, crit, self.shapes, self.last_grad_norms)
+        self.history.append({"step": step, "ranks": dict(result.ranks), "criticality": crit,
+                             "budget_used": result.total_used})
+        return result

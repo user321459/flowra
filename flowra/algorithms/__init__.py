@@ -1,34 +1,36 @@
-"""
-FLOWRA
-"""
+"""Rank allocation, dynamic refinement and multi-task composition."""
 
 from flowra.algorithms.allocation import (
-    RankAllocator,
-    SpectralRankAllocator,
-    UniformRankAllocator,
-    AdaptiveRankAllocator,
-)
-from flowra.algorithms.refinement import (
-    SubspaceRefiner,
-    ProgressiveSubspaceRefiner,
-    GradientSubspaceTracker,
+    AllocationResult,
+    BlockAssignment,
+    allocate_ranks,
+    generate_block_blueprint,
+    uniform_rank_for_budget,
+    uniform_ranks,
 )
 from flowra.algorithms.composition import (
-    AdapterComposer,
+    NaiveMergeComposer,
     OrthogonalComposer,
-    LinearComposer,
     TaskArithmeticComposer,
+    TIESComposer,
+    adapter_deltas,
+    apply_deltas,
 )
-from flowra.algorithms.initialization import (
-    AdapterInitializer,
-    FlowAwareInitializer,
-    KaimingInitializer,
-    SVDInitializer,
-)
+from flowra.algorithms.refinement import RankRefiner, refinement_schedule
 
 __all__ = [
-    "RankAllocator", "SpectralRankAllocator", "UniformRankAllocator", "AdaptiveRankAllocator",
-    "SubspaceRefiner", "ProgressiveSubspaceRefiner", "GradientSubspaceTracker",
-    "AdapterComposer", "OrthogonalComposer", "LinearComposer", "TaskArithmeticComposer",
-    "AdapterInitializer", "FlowAwareInitializer", "KaimingInitializer", "SVDInitializer",
+    "AllocationResult",
+    "BlockAssignment",
+    "allocate_ranks",
+    "generate_block_blueprint",
+    "uniform_rank_for_budget",
+    "uniform_ranks",
+    "NaiveMergeComposer",
+    "OrthogonalComposer",
+    "TaskArithmeticComposer",
+    "TIESComposer",
+    "adapter_deltas",
+    "apply_deltas",
+    "RankRefiner",
+    "refinement_schedule",
 ]

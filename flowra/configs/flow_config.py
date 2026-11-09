@@ -1,274 +1,118 @@
 """
-Main FLOWRA Configuration
+FLowRA configuration.
 
-The FlowConfig class is the primary configuration object that combines
-all sub-configurations and provides the main interface for users.
+User-configurable parameters:
+
+* ``budget`` - trainable-parameter budget ``B`` as a fraction of the model
+  parameters (e.g. 0.0005-0.02);
+* ``eta`` - composition threshold used when combining task-specific adapters
+  (default 0.3).
+
+Remaining settings are internal and fixed by default: ``gamma = 1``,
+``beta`` / ``tau`` (block-level only), transformer attention/FFN and V/O
+splits (``alpha = 0.7``), a refinement warm-up of 10% of ``T`` then every
+100 steps, and up to 512 calibration examples from the training split.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Union
-from enum import Enum
 import json
+from dataclasses import asdict, dataclass, field, fields, replace
+from typing import Any, Dict, List, Optional
 
-
-class AdapterType(Enum):
-    """Types of adapters available in FLOWRA."""
-    LORA = "lora"
-    ATTENTION = "attention"
-    NORMALIZATION = "normalization"
-    AUTO = "auto"  # Automatically determined by flow analysis
-
-
-class AllocationStrategy(Enum):
-    """Rank allocation strategies."""
-    SPECTRAL = "spectral"  # Flow-based spectral allocation
-    UNIFORM = "uniform"    # Equal rank for all layers
-    ADAPTIVE = "adaptive"  # Adaptive based on training dynamics
-
-
-class RefinementStrategy(Enum):
-    """Subspace refinement strategies during training."""
-    NONE = "none"         # No refinement
-    PROGRESSIVE = "progressive"  # Progressive pruning
-    ELASTIC = "elastic"   # Elastic rank adjustment
-
-
-class InitializationStrategy(Enum):
-    """Adapter initialization strategies."""
-    FLOW_AWARE = "flow_aware"  # Based on gradient covariance
-    KAIMING = "kaiming"        # Standard Kaiming initialization
-    SVD = "svd"                # SVD of pretrained weights
-    ZERO = "zero"              # Zero initialization for B
+GRANULARITIES = ("module", "block")
+SCALING_MODES = ("flow", "lora", "rslora")
 
 
 @dataclass
 class FlowConfig:
-    """
-    Main configuration class for FLOWRA framework.
-    
-    This is the primary interface for configuring all aspects of
-    the FLOWRA adaptation process.
-    
-    Attributes
-    ----------
-    total_budget : float
-        Fraction of base model parameters to use for adaptation.
-        Default is 0.01 (1% of base parameters).
-    
-    interference_threshold : float
-        Threshold η for multi-task composition safety.
-        Pairs with interference > η will be orthogonalized.
-        Default is 0.3.
-    
-    adapter_type : AdapterType
-        Type of adapter to use. AUTO will determine based on flow analysis.
-    
-    allocation_strategy : AllocationStrategy
-        How to allocate ranks across layers.
-    
-    refinement_strategy : RefinementStrategy
-        How to refine subspaces during training.
-    
-    initialization_strategy : InitializationStrategy
-        How to initialize adapter parameters.
-    
-    min_rank : int
-        Minimum rank for any layer. Default is 1.
-    
-    max_rank : int
-        Maximum rank for any layer. Default is 64.
-    
-    dropout : float
-        Dropout probability for adapters. Default is 0.0.
-    
-    target_modules : Optional[List[str]]
-        List of module name patterns to adapt. None means auto-detect.
-    
-    exclude_modules : Optional[List[str]]
-        List of module name patterns to exclude from adaptation.
-    
-    use_rslora : bool
-        Whether to use rank-stabilized LoRA scaling. Default is True.
-    
-    device : Optional[str]
-        Device to use. None means auto-detect.
-    
-    seed : Optional[int]
-        Random seed for reproducibility.
-    
-    verbose : bool
-        Whether to print progress information.
-    
-    Examples
-    --------
-    >>> config = FlowConfig(total_budget=0.01, verbose=True)
-    >>> framework = FLOWRA(model, config)
-    
-    >>> # Custom configuration
-    >>> config = FlowConfig(
-    ...     total_budget=0.02,
-    ...     allocation_strategy=AllocationStrategy.SPECTRAL,
-    ...     refinement_strategy=RefinementStrategy.PROGRESSIVE,
-    ...     target_modules=["q_proj", "v_proj", "k_proj"],
-    ...     min_rank=4,
-    ...     max_rank=32,
-    ... )
-    """
-    
-    # Main parameters (only 2 required as per paper)
-    total_budget: float = 0.01
-    interference_threshold: float = 0.3
-    
-    # Strategy selections
-    adapter_type: AdapterType = AdapterType.AUTO
-    allocation_strategy: AllocationStrategy = AllocationStrategy.SPECTRAL
-    refinement_strategy: RefinementStrategy = RefinementStrategy.NONE
-    initialization_strategy: InitializationStrategy = InitializationStrategy.FLOW_AWARE
-    
-    # Rank constraints
-    min_rank: int = 1
-    max_rank: int = 64
-    max_rank_ratio: float = 0.5  # Max fraction of min(m,n) for rank
-    
-    # Adapter settings
+    # User-configurable parameters
+    budget: float = 0.0087
+    eta: float = 0.3
+
+    # Internal settings (not tuned by the user)
+    gamma: float = 1.0
+    beta: float = 1.0
+    tau: int = 1
+    granularity: str = "module"
+    calibration_samples: int = 512
+    eps: float = 1e-8
+    alignment: str = "zero_pad"
+    handler: str = "auto"
+    fp16_states: bool = False
+    block_sensitivity: str = "auto"
+    refinement: bool = True
+    warmup_ratio: float = 0.1
+    refine_interval: int = 100
+    scaling: str = "flow"
+    min_flow_scale: float = 0.05
+    lora_alpha: float = 16.0
+    transformer_formulas: bool = True
+    attention_alpha: float = 0.7       # fraction of a head rank assigned to V/O
+
+    # Adapter realisation
+    adapter_variant: str = "lora"
+    polymorphic: bool = True
     dropout: float = 0.0
-    use_rslora: bool = True  # Rank-stabilized scaling
-    use_dora: bool = False   # Weight-decomposed adaptation
-    
-    # Module selection
+
+    # Ablation switches
+    use_flow: bool = True
+    orthogonal_composition: bool = True
+
+    # Target selection (regex patterns; None = handler default).  Modules in
+    # ``modules_to_save`` (e.g. a new classification head) are trained fully,
+    # excluded from the targets and reported separately from the budget.
     target_modules: Optional[List[str]] = None
     exclude_modules: Optional[List[str]] = None
-    
-    # Flow analysis settings
-    num_fisher_samples: int = 100
-    fisher_subsample_size: Optional[int] = None
-    use_empirical_fisher: bool = True
-    
-    # Refinement settings
-    refinement_interval: int = 100
-    refinement_warmup: int = 100
-    refinement_threshold: float = 0.1
-    min_rank_fraction: float = 0.25
-    
-    # Composition settings
-    composition_method: str = "orthogonal"
-    energy_threshold: float = 0.95
-    
-    # System settings
+    modules_to_save: Optional[List[str]] = None
+
     device: Optional[str] = None
-    seed: Optional[int] = None
+    seed: int = 0
     verbose: bool = True
-    
-    # Advanced settings
-    gradient_checkpointing: bool = False
-    mixed_precision: bool = False
-    compile_model: bool = False
-    
+
     def __post_init__(self):
-        """Validate configuration after initialization."""
-        self._validate()
-    
-    def _validate(self):
-        """Validate configuration parameters."""
-        if not 0 < self.total_budget <= 1:
-            raise ValueError(f"total_budget must be in (0, 1], got {self.total_budget}")
-        
-        if not 0 <= self.interference_threshold <= 1:
-            raise ValueError(f"interference_threshold must be in [0, 1], got {self.interference_threshold}")
-        
-        if self.min_rank < 1:
-            raise ValueError(f"min_rank must be >= 1, got {self.min_rank}")
-        
-        if self.max_rank < self.min_rank:
-            raise ValueError(f"max_rank ({self.max_rank}) must be >= min_rank ({self.min_rank})")
-        
-        if not 0 <= self.dropout < 1:
-            raise ValueError(f"dropout must be in [0, 1), got {self.dropout}")
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert configuration to dictionary."""
-        result = {}
-        for key, value in self.__dict__.items():
-            if isinstance(value, Enum):
-                result[key] = value.value
-            else:
-                result[key] = value
-        return result
-    
-    @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "FlowConfig":
-        """Create configuration from dictionary."""
-        # Convert enum strings back to enums
-        enum_fields = {
-            "adapter_type": AdapterType,
-            "allocation_strategy": AllocationStrategy,
-            "refinement_strategy": RefinementStrategy,
-            "initialization_strategy": InitializationStrategy,
+        if not 0 < self.budget <= 1:
+            raise ValueError(f"budget must be in (0, 1], got {self.budget}")
+        if not 0 <= self.eta <= 1:
+            raise ValueError(f"eta must be in [0, 1], got {self.eta}")
+        if self.granularity not in GRANULARITIES:
+            raise ValueError(f"granularity must be one of {GRANULARITIES}")
+        if self.scaling not in SCALING_MODES:
+            raise ValueError(f"scaling must be one of {SCALING_MODES}")
+        if self.gamma <= 0 or self.beta <= 0:
+            raise ValueError("gamma and beta must be positive")
+        if not 0.0 <= self.attention_alpha <= 1.0:
+            raise ValueError(f"attention_alpha must be in [0, 1], got {self.attention_alpha}")
+
+    @property
+    def user_parameters(self) -> Dict[str, float]:
+        return {"budget": self.budget, "eta": self.eta}
+
+    def variant(self, name: str) -> "FlowConfig":
+        """Named ablation: ``full``, ``no_flow``, ``no_refinement``,
+        ``no_polymorphic``, ``no_composition``."""
+        changes = {
+            "full": {},
+            "no_flow": {"use_flow": False},
+            "no_refinement": {"refinement": False},
+            "no_polymorphic": {"polymorphic": False},
+            "no_composition": {"orthogonal_composition": False},
         }
-        
-        processed = config_dict.copy()
-        for field_name, enum_class in enum_fields.items():
-            if field_name in processed and isinstance(processed[field_name], str):
-                processed[field_name] = enum_class(processed[field_name])
-        
-        return cls(**processed)
-    
-    def save(self, path: str):
-        """Save configuration to JSON file."""
-        with open(path, "w") as f:
+        if name not in changes:
+            raise ValueError(f"Unknown variant '{name}', expected one of {sorted(changes)}")
+        return replace(self, **changes[name])
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "FlowConfig":
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})
+
+    def save(self, path: str) -> None:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
-    
+
     @classmethod
     def load(cls, path: str) -> "FlowConfig":
-        """Load configuration from JSON file."""
-        with open(path, "r") as f:
-            config_dict = json.load(f)
-        return cls.from_dict(config_dict)
-    
-    def get_effective_budget(self, base_params: int) -> int:
-        """Calculate effective parameter budget given base model size."""
-        return int(base_params * self.total_budget)
-    
-    def __repr__(self) -> str:
-        return (
-            f"FlowConfig(\n"
-            f"  total_budget={self.total_budget},\n"
-            f"  interference_threshold={self.interference_threshold},\n"
-            f"  allocation_strategy={self.allocation_strategy.value},\n"
-            f"  refinement_strategy={self.refinement_strategy.value},\n"
-            f"  min_rank={self.min_rank}, max_rank={self.max_rank}\n"
-            f")"
-        )
-
-
-# Preset configurations
-def get_default_config() -> FlowConfig:
-    """Get default FLOWRA configuration."""
-    return FlowConfig()
-
-
-def get_efficient_config() -> FlowConfig:
-    """Get configuration optimized for efficiency (smaller adapters)."""
-    return FlowConfig(
-        total_budget=0.005,
-        max_rank=16,
-        refinement_strategy=RefinementStrategy.PROGRESSIVE,
-    )
-
-
-def get_quality_config() -> FlowConfig:
-    """Get configuration optimized for quality (larger adapters)."""
-    return FlowConfig(
-        total_budget=0.05,
-        max_rank=128,
-        initialization_strategy=InitializationStrategy.SVD,
-    )
-
-
-def get_multi_task_config() -> FlowConfig:
-    """Get configuration optimized for multi-task composition."""
-    return FlowConfig(
-        total_budget=0.02,
-        interference_threshold=0.2,
-        composition_method="orthogonal",
-    )
+        with open(path, "r", encoding="utf-8") as f:
+            return cls.from_dict(json.load(f))

@@ -1,0 +1,35 @@
+# GLUE on LLaMA-3-8B. Requires a Hugging Face token for gated weights.
+model: meta-llama/Meta-Llama-3-8B
+dtype: bfloat16
+max_length: 128
+batch_size: 1
+eval_batch_size: 4
+lora_rank: 16                 # LoRA / DoRA / AdaLoRA reference rank
+
+flowra:
+  budget: 0.0087              # 0.87% of base parameters
+  eta: 0.3
+  calibration_samples: 512
+  modules_to_save: ["score"]
+
+training:
+  lr: 0.001
+  weight_decay: 0.0
+  lr_schedule: linear
+  lr_warmup_ratio: 0.06
+  grad_clip: 1.0
+  log_every: 50
+
+epochs:
+  cola: 20
+  sst2: 10
+  mrpc: 20
+  qqp: 5
+  stsb: 20
+  mnli: 5
+  qnli: 5
+  rte: 20
+  wnli: 20
+
+seeds: [0, 1, 2]
+methods: [full_ft, lora, adalora, dora, flowra]

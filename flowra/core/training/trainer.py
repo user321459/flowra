@@ -1,177 +1,196 @@
 """
-FLOWRA Trainer
+Adapter training loop.
 
-Main training loop with support for dynamic refinement.
+Only the adapter parameters ``Phi`` are updated.  At every step
+``t in T_ref`` the trainer calls ``refine_fn(t)``; when ranks change, the
+optimizer is rebuilt and the AdamW moments of retained components are
+carried over.
 """
+
+import math
+import time
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-from typing import Dict, List, Optional, Any
-from tqdm import tqdm
 
-from flowra.core.training.callbacks import TrainingCallback, EarlyStoppingCallback
+from flowra.configs.training_config import TrainingConfig
+from flowra.core.adapters.base import ResizeRecord
+from flowra.utils.batching import forward_loss, move_to_device
+from flowra.utils.logging_utils import ExperimentLogger
+
+
+def lr_multiplier(step: int, total: int, warmup: int, schedule: str) -> float:
+    if warmup and step < warmup:
+        return (step + 1) / warmup
+    if schedule == "constant":
+        return 1.0
+    progress = (step - warmup) / max(1, total - warmup)
+    if schedule == "cosine":
+        return 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+    if schedule == "poly":
+        return (1.0 - min(progress, 1.0)) ** 0.9  # SETR-Naive ADE20K
+    return max(0.0, 1.0 - progress)
 
 
 class FlowraTrainer:
-    """
-    Trainer for FLOWRA adapted models.
-    """
-    
     def __init__(
         self,
         model: nn.Module,
-        adapters: Dict[str, nn.Module],
-        train_loader: DataLoader,
-        val_loader: Optional[DataLoader] = None,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        scheduler: Optional[Any] = None,
-        loss_fn: Optional[nn.Module] = None,
-        callbacks: Optional[List[TrainingCallback]] = None,
-        device: torch.device = None
+        params_fn: Callable[[], Iterable[nn.Parameter]],
+        train_loader: Iterable,
+        config: TrainingConfig,
+        loss_fn=None,
+        eval_fn: Optional[Callable[[nn.Module], Dict[str, float]]] = None,
+        refine_fn: Optional[Callable[[int], Optional[List[ResizeRecord]]]] = None,
+        refine_steps: Sequence[int] = (),
+        logger: Optional[ExperimentLogger] = None,
+        device: Optional[torch.device] = None,
     ):
         self.model = model
-        self.adapters = adapters
+        self.params_fn = params_fn
         self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
-        self.model.to(self.device)
-        
-        # Setup optimizer
-        if optimizer is None:
-            adapter_params = []
-            for adapter in adapters.values():
-                adapter_params.extend(p for p in adapter.parameters() if p.requires_grad)
-            self.optimizer = torch.optim.AdamW(adapter_params, lr=1e-4)
-        else:
-            self.optimizer = optimizer
-        
-        self.scheduler = scheduler
-        self.loss_fn = loss_fn or nn.CrossEntropyLoss()
-        self.callbacks = callbacks or []
-        
+        self.config = config
+        self.loss_fn = loss_fn
+        self.eval_fn = eval_fn
+        self.refine_fn = refine_fn
+        self.refine_steps = set(refine_steps)
+        self.logger = logger or ExperimentLogger(console=True)
+        self.device = device or next(model.parameters()).device
         self.global_step = 0
-        self.current_epoch = 0
-        self.training_history: List[Dict] = []
-    
-    def train(self, epochs: int = 3, max_steps: Optional[int] = None):
-        """Run training loop."""
-        self.model.train()
-        
-        for callback in self.callbacks:
-            callback.on_train_begin(self)
-        
-        for epoch in range(epochs):
-            self.current_epoch = epoch
-            epoch_loss = 0.0
-            
-            for callback in self.callbacks:
-                callback.on_epoch_begin(self, epoch)
-            
-            progress = tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{epochs}")
-            
-            for batch in progress:
-                if max_steps and self.global_step >= max_steps:
-                    break
-                
-                for callback in self.callbacks:
-                    callback.on_step_begin(self, self.global_step)
-                
-                loss = self._training_step(batch)
-                epoch_loss += loss
-                
-                for callback in self.callbacks:
-                    callback.on_step_end(self, self.global_step, loss)
-                
-                # Check early stopping
-                for callback in self.callbacks:
-                    if isinstance(callback, EarlyStoppingCallback) and callback.should_stop:
-                        print("Early stopping triggered")
-                        return
-                
-                progress.set_postfix({'loss': loss})
-                self.global_step += 1
-            
-            # Epoch end
-            metrics = {'train_loss': epoch_loss / len(self.train_loader)}
-            
-            if self.val_loader:
-                val_metrics = self.evaluate()
-                metrics.update(val_metrics)
-            
-            self.training_history.append(metrics)
-            
-            for callback in self.callbacks:
-                callback.on_epoch_end(self, epoch, metrics)
-            
-            print(f"Epoch {epoch+1}: {metrics}")
-        
-        for callback in self.callbacks:
-            callback.on_train_end(self)
-    
-    def _training_step(self, batch) -> float:
-        """Single training step."""
-        if isinstance(batch, (tuple, list)):
-            inputs = batch[0].to(self.device)
-            targets = batch[1].to(self.device) if len(batch) > 1 else None
-        else:
-            inputs = batch.to(self.device)
-            targets = None
-        
-        self.optimizer.zero_grad()
-        outputs = self.model(inputs)
-        
-        if targets is not None:
-            if outputs.dim() == 3:
-                loss = self.loss_fn(outputs[:, :-1].reshape(-1, outputs.size(-1)), targets[:, 1:].reshape(-1))
-            else:
-                loss = self.loss_fn(outputs, targets)
-        else:
-            if outputs.dim() == 3:
-                loss = self.loss_fn(outputs[:, :-1].reshape(-1, outputs.size(-1)), outputs[:, 1:].argmax(-1).reshape(-1))
-            else:
-                loss = outputs.mean()
-        
-        loss.backward()
-        self.optimizer.step()
-        
-        if self.scheduler:
-            self.scheduler.step()
-        
-        return loss.item()
-    
+        self.history: List[Dict[str, Any]] = []
+        self._last_eval: Optional[Dict[str, float]] = None
+        self.optimizer = self._new_optimizer()
+
+    @property
+    def total_steps(self) -> int:
+        if self.config.max_steps:
+            return self.config.max_steps
+        return self.config.epochs * len(self.train_loader)
+
+    def _new_optimizer(self) -> torch.optim.Optimizer:
+        params = [p for p in self.params_fn() if p.requires_grad]
+        return torch.optim.AdamW(params, lr=self.config.lr, weight_decay=self.config.weight_decay)
+
+    def _rebuild_optimizer(self, records: List[ResizeRecord]) -> None:
+        old = self.optimizer
+        new = self._new_optimizer()
+        for group_new, group_old in zip(new.param_groups, old.param_groups):
+            group_new["lr"] = group_old["lr"]
+        replaced = {}
+        for rec in records:
+            replaced[rec.new_A] = (old.state.get(rec.old_A), rec, "A")
+            replaced[rec.new_B] = (old.state.get(rec.old_B), rec, "B")
+        for group in new.param_groups:
+            for p in group["params"]:
+                if p in replaced:
+                    state, rec, which = replaced[p]
+                    if state:
+                        new.state[p] = _transfer_state(state, p, rec, which)
+                elif p in old.state:
+                    new.state[p] = old.state[p]
+        self.optimizer = new
+
+    def _set_lr(self) -> float:
+        total = self.total_steps
+        warmup = int(self.config.lr_warmup_ratio * total)
+        lr = self.config.lr * lr_multiplier(self.global_step, total, warmup, self.config.lr_schedule)
+        for group in self.optimizer.param_groups:
+            group["lr"] = lr
+        return lr
+
     def evaluate(self) -> Dict[str, float]:
-        """Run evaluation."""
+        if self.eval_fn is None:
+            return {}
+        was_training = self.model.training
         self.model.eval()
-        total_loss = 0.0
-        
         with torch.no_grad():
-            for batch in self.val_loader:
-                if isinstance(batch, (tuple, list)):
-                    inputs = batch[0].to(self.device)
-                    targets = batch[1].to(self.device) if len(batch) > 1 else None
-                else:
-                    inputs = batch.to(self.device)
-                    targets = None
-                
-                outputs = self.model(inputs)
-                
-                if targets is not None:
-                    if outputs.dim() == 3:
-                        loss = self.loss_fn(outputs[:, :-1].reshape(-1, outputs.size(-1)), targets[:, 1:].reshape(-1))
-                    else:
-                        loss = self.loss_fn(outputs, targets)
-                else:
-                    loss = outputs.mean()
-                
-                total_loss += loss.item()
-        
-        self.model.train()
-        
-        metrics = {'eval_loss': total_loss / len(self.val_loader)}
-        
-        for callback in self.callbacks:
-            callback.on_evaluate(self, metrics)
-        
+            metrics = self.eval_fn(self.model)
+        self.model.train(was_training)
         return metrics
+
+    def train(self) -> List[Dict[str, Any]]:
+        cfg = self.config
+        total = self.total_steps
+        self.model.train()
+        start = time.time()
+        running, running_n = 0.0, 0
+        done = False
+        epoch = 0
+        while not done:
+            for batch in self.train_loader:
+                if self.global_step >= total:
+                    done = True
+                    break
+                lr = self._set_lr()
+                batch = move_to_device(batch, self.device)
+                loss, _ = forward_loss(self.model, batch, self.loss_fn)
+                loss.backward()
+                if cfg.grad_clip:
+                    torch.nn.utils.clip_grad_norm_(
+                        [p for g in self.optimizer.param_groups for p in g["params"]], cfg.grad_clip
+                    )
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
+                running += float(loss.detach())
+                running_n += 1
+                step = self.global_step
+
+                if self.refine_fn is not None and step in self.refine_steps:
+                    records = self.refine_fn(step)
+                    if records is not None:
+                        self._rebuild_optimizer(records)
+
+                self.global_step += 1
+                if cfg.log_every and self.global_step % cfg.log_every == 0:
+                    rec = {"step": self.global_step, "epoch": epoch, "loss": running / running_n, "lr": lr}
+                    self.history.append(rec)
+                    self.logger.log("train", rec, f"step {self.global_step:>6d}/{total} | epoch {epoch} | "
+                                                  f"loss {rec['loss']:.4f} | lr {lr:.2e}")
+                    running, running_n = 0.0, 0
+                if cfg.eval_every and self.global_step % cfg.eval_every == 0:
+                    self._log_eval(epoch)
+            epoch += 1
+            if not cfg.max_steps and epoch >= cfg.epochs:
+                done = True
+        if cfg.eval_every and self.global_step % cfg.eval_every == 0 and self._last_eval is not None:
+            metrics = self._last_eval
+        else:
+            metrics = self._log_eval(epoch, final=True)
+        self.logger.log("train_end", {"steps": self.global_step, "seconds": time.time() - start, **metrics},
+                        f"training finished: {self.global_step} steps in {time.time() - start:.1f}s")
+        return self.history
+
+    def _log_eval(self, epoch: int, final: bool = False) -> Dict[str, float]:
+        metrics = self.evaluate()
+        self._last_eval = metrics
+        if metrics:
+            rec = {"step": self.global_step, "epoch": epoch, "final": final, **metrics}
+            self.history.append(rec)
+            self.logger.log("eval", rec, f"eval @ step {self.global_step}: " +
+                            ", ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
+        return metrics
+
+
+def _transfer_state(state: Dict[str, Any], new_param: torch.Tensor, rec: ResizeRecord, which: str) -> Dict[str, Any]:
+    kept = rec.kept
+    k = len(kept)
+    out = {"step": state["step"].clone() if torch.is_tensor(state["step"]) else state["step"]}
+    for key in ("exp_avg", "exp_avg_sq"):
+        old = state.get(key)
+        if old is None:
+            continue
+        new = torch.zeros_like(new_param)
+        if which == "A":
+            if k:
+                new[:k] = old[kept]
+                if key == "exp_avg_sq" and new.shape[0] > k:
+                    new[k:] = old[kept].mean(dim=0, keepdim=True)
+        else:
+            scale = rec.b_scale if key == "exp_avg" else rec.b_scale ** 2
+            if k:
+                new[:, :k] = old[:, kept] * scale
+                if key == "exp_avg_sq" and new.shape[1] > k:
+                    new[:, k:] = new[:, :k].mean(dim=1, keepdim=True)
+        out[key] = new
+    return out
